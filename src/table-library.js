@@ -18,11 +18,14 @@
         tableID: config.tableID || "smart-table-" + Date.now(),
         hideColumns: config.hideColumns || [],
         modifyConfig: config.modifyConfig || {},
+        downloadConfig: config.downloadConfig || {},
         ...config,
       };
 
       this.processedData = [];
       this.processedHeadings = [];
+      this.filteredData = [];
+      this.displayData = []; // Data as shown in table (with modifications)
 
       this.init();
     }
@@ -103,13 +106,27 @@
     }
 
     /**
-     * Generate HTML for the table
+     * Generate HTML for the table including download button if configured
      */
     generateHTML(headings, data) {
-      const { tableID } = this.config;
+      const { tableID, downloadConfig } = this.config;
+
+      const topDownloadButtonHTML =
+        downloadConfig.enable &&
+        (downloadConfig.position === "top-right" ||
+          downloadConfig.position === "top-left" ||
+          downloadConfig.position === "top-center")
+          ? this.generateDownloadButton("top")
+          : "";
+
+      const bottomDownloadButtonHTML =
+        downloadConfig.enable && downloadConfig.position === "bottom"
+          ? this.generateDownloadButton("bottom")
+          : "";
 
       let tableHTML = `
         <div class="table-library-container">
+          ${topDownloadButtonHTML}
           <table id="${tableID}">
             <thead>
               <tr>
@@ -145,10 +162,37 @@
                 .join("")}
             </tbody>
           </table>
+          ${bottomDownloadButtonHTML}
         </div>
       `;
 
       return tableHTML;
+    }
+
+    /**
+     * Generate download button HTML based on user configuration
+     */
+    generateDownloadButton(position) {
+      const { downloadConfig } = this.config;
+      const {
+        buttonText = "Download Table Data",
+        buttonClass = "table-library-download-btn",
+        customHTML = null,
+      } = downloadConfig;
+
+      // If user provides custom HTML, use it
+      if (customHTML) {
+        return `<div class="table-library-download-container table-library-download-${position}">${customHTML}</div>`;
+      }
+
+      // Default download button
+      return `
+        <div class="table-library-download-container table-library-download-${position}">
+          <button class="${buttonClass}" id="${this.config.tableID}-download-${position}">
+            ${buttonText}
+          </button>
+        </div>
+      `;
     }
 
     /**
@@ -232,6 +276,41 @@
     }
 
     /**
+     * Get cell text content for CSV export (uses displayed value)
+     */
+    getCellTextContent(cell) {
+      if (cell === null || cell === undefined) {
+        return "";
+      }
+
+      if (typeof cell === "object" && cell !== null) {
+        if (cell.type === "url") {
+          return cell.placeholder || "Open";
+        }
+
+        if (cell.type === "button") {
+          return cell.placeholder || "Action";
+        }
+
+        if (Array.isArray(cell)) {
+          return cell.join("; ");
+        }
+
+        if (cell instanceof Date && !isNaN(cell.getTime())) {
+          return this.formatDateOrTimestamp(cell);
+        }
+
+        return JSON.stringify(cell);
+      }
+
+      if (typeof cell === "boolean") {
+        return cell ? "Yes" : "No";
+      }
+
+      return String(cell);
+    }
+
+    /**
      * Initialize the table - main entry point
      */
     init() {
@@ -243,6 +322,8 @@
 
       this.processedData = finalData;
       this.processedHeadings = processed.headings;
+      this.filteredData = [...finalData];
+      this.displayData = [...finalData]; // Store the display data
 
       const container =
         typeof this.config.container === "string"
@@ -278,7 +359,9 @@
         const inputs = document.querySelectorAll(`#${tableID} thead input`);
         const rows = document.querySelectorAll(`#${tableID} tbody tr`);
 
-        rows.forEach((row) => {
+        const visibleRowIndexes = [];
+
+        rows.forEach((row, index) => {
           let visible = true;
           inputs.forEach((input, i) => {
             const filter = input.value.trim().toLowerCase();
@@ -288,7 +371,13 @@
             }
           });
           row.style.display = visible ? "" : "none";
+          if (visible) visibleRowIndexes.push(index);
         });
+
+        // Update filtered data based on visible rows (using display data)
+        this.filteredData = visibleRowIndexes.map(
+          (index) => this.displayData[index]
+        );
       };
 
       // Filter events
@@ -298,7 +387,28 @@
           input.addEventListener("input", debounce(filterTable, 300))
         );
 
-      // Button click events - FIXED: Only call user function once
+      // Download button events for both top and bottom buttons
+      if (this.config.downloadConfig.enable) {
+        const topDownloadBtn = document.getElementById(
+          `${tableID}-download-top`
+        );
+        const bottomDownloadBtn = document.getElementById(
+          `${tableID}-download-bottom`
+        );
+
+        if (topDownloadBtn) {
+          topDownloadBtn.addEventListener("click", () =>
+            this.downloadTableData()
+          );
+        }
+        if (bottomDownloadBtn) {
+          bottomDownloadBtn.addEventListener("click", () =>
+            this.downloadTableData()
+          );
+        }
+      }
+
+      // Button click events
       document.querySelectorAll(".table-library-action-btn").forEach((btn) => {
         btn.addEventListener("click", (e) => {
           e.preventDefault();
@@ -314,10 +424,9 @@
             btn.style.transform = "";
           }, 150);
 
-          // FIXED: Call user function only once
           this.callUserFunction(fnName, rowData, rowIndex);
 
-          // FIXED: Auto-check the checkbox when button is clicked
+          // Auto-check the checkbox when button is clicked
           const checkbox = btn
             .closest(".table-library-action-cell")
             ?.querySelector(".table-library-action-checkbox");
@@ -353,6 +462,60 @@
             }
           });
         });
+    }
+
+    /**
+     * Download table data as CSV
+     */
+    downloadTableData() {
+      const { downloadConfig } = this.config;
+      const { filename = "table-data.csv", includeHeaders = true } =
+        downloadConfig;
+
+      this.downloadAsCSV(filename, includeHeaders);
+    }
+
+    /**
+     * Download filtered data as CSV (using displayed values)
+     */
+    downloadAsCSV(filename, includeHeaders = true) {
+      const headers = this.processedHeadings;
+      const data = this.filteredData;
+
+      // Convert data to CSV format using displayed values
+      let csvContent = "";
+
+      // Add headers
+      if (includeHeaders) {
+        csvContent += headers.map((header) => `"${header}"`).join(",") + "\n";
+      }
+
+      // Add rows using displayed values
+      data.forEach((row) => {
+        const csvRow = row.map((cell) => {
+          // Get the displayed text content (same as shown in table)
+          const cellValue = this.getCellTextContent(cell);
+
+          // Escape quotes and convert to string
+          const stringValue = String(cellValue).replace(/"/g, '""');
+          return `"${stringValue}"`;
+        });
+
+        csvContent += csvRow.join(",") + "\n";
+      });
+
+      // Create and trigger download
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+
+      link.setAttribute("href", url);
+      link.setAttribute("download", filename);
+      link.style.visibility = "hidden";
+
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     }
 
     /**
@@ -418,6 +581,13 @@
         });
       return checkedRows;
     }
+
+    /**
+     * PUBLIC API: Get filtered data (data currently visible after search/filter)
+     */
+    getFilteredData() {
+      return this.filteredData;
+    }
   }
 
   /**
@@ -428,11 +598,18 @@
   };
 })(window);
 
-// // table-library.js - Smart Frontend Table Library
+// /**
+//  * TABLE LIBRARY - Smart Frontend Table Library
+//  * A lightweight, customizable table library with filtering, actions, and rich data display
+//  */
+
 // (function (global) {
 //   "use strict";
 
 //   class TableLibrary {
+//     /**
+//      * Initialize the table library with configuration
+//      */
 //     constructor(config = {}) {
 //       this.config = {
 //         container: config.container || "body",
@@ -441,13 +618,20 @@
 //         tableID: config.tableID || "smart-table-" + Date.now(),
 //         hideColumns: config.hideColumns || [],
 //         modifyConfig: config.modifyConfig || {},
+//         downloadConfig: config.downloadConfig || {},
 //         ...config,
 //       };
+
+//       this.processedData = [];
+//       this.processedHeadings = [];
+//       this.filteredData = [];
 
 //       this.init();
 //     }
 
-//     // Format date in a user-friendly way
+//     /**
+//      * Format dates in a user-friendly way
+//      */
 //     formatDateOrTimestamp(dateObj) {
 //       if (!(dateObj instanceof Date) || isNaN(dateObj.getTime())) return "";
 
@@ -470,14 +654,9 @@
 //       return new Intl.DateTimeFormat("en-IN", options).format(dateObj);
 //     }
 
-//     // Calculate days ago for dates
-//     getDaysAgo(dateObj) {
-//       if (!(dateObj instanceof Date) || isNaN(dateObj.getTime())) return 0;
-//       const today = new Date();
-//       return Math.floor((today - dateObj) / (1000 * 60 * 60 * 24));
-//     }
-
-//     // Apply user modifications to data
+//     /**
+//      * Apply user-defined modifications to specific cells or columns
+//      */
 //     applyModifications(data, headings) {
 //       if (!this.config.modifyConfig) return data;
 
@@ -507,7 +686,9 @@
 //       );
 //     }
 
-//     // Hide specified columns
+//     /**
+//      * Hide specified columns from the table
+//      */
 //     hideColumns(headings, data) {
 //       const hideCols = Array.isArray(this.config.hideColumns)
 //         ? this.config.hideColumns
@@ -523,12 +704,19 @@
 //       };
 //     }
 
-//     // Generate HTML table
+//     /**
+//      * Generate HTML for the table including download button if configured
+//      */
 //     generateHTML(headings, data) {
-//       const { tableID } = this.config;
+//       const { tableID, downloadConfig } = this.config;
+
+//       const downloadButtonHTML = downloadConfig.enable
+//         ? this.generateDownloadButton()
+//         : "";
 
 //       let tableHTML = `
 //         <div class="table-library-container">
+//           ${downloadButtonHTML}
 //           <table id="${tableID}">
 //             <thead>
 //               <tr>
@@ -570,16 +758,42 @@
 //       return tableHTML;
 //     }
 
-//     // Render individual cell content
+//     /**
+//      * Generate download button HTML based on user configuration
+//      */
+//     generateDownloadButton() {
+//       const { downloadConfig } = this.config;
+//       const {
+//         buttonText = "Download Table Data",
+//         buttonClass = "table-library-download-btn",
+//         position = "top-right",
+//         customHTML = null,
+//       } = downloadConfig;
+
+//       // If user provides custom HTML, use it
+//       if (customHTML) {
+//         return `<div class="table-library-download-container table-library-download-${position}">${customHTML}</div>`;
+//       }
+
+//       // Default download button
+//       return `
+//         <div class="table-library-download-container table-library-download-${position}">
+//           <button class="${buttonClass}" id="${this.config.tableID}-download">
+//             ${buttonText}
+//           </button>
+//         </div>
+//       `;
+//     }
+
+//     /**
+//      * Render individual cell content based on data type
+//      */
 //     renderCell(cell, rowIndex, colIndex) {
-//       // Handle null/undefined
 //       if (cell === null || cell === undefined) {
 //         return '<span class="table-library-null">-</span>';
 //       }
 
-//       // Handle action objects (url, button)
 //       if (typeof cell === "object" && cell !== null) {
-//         // URL type
 //         if (cell.type === "url") {
 //           return `<a href="${
 //             cell.value
@@ -588,7 +802,6 @@
 //           }</a>`;
 //         }
 
-//         // Button type
 //         if (cell.type === "button") {
 //           const hasCheckbox = cell.checkbox ? "has-checkbox" : "";
 //           const checkedAttr = cell.checkboxValue ? "checked" : "";
@@ -617,7 +830,6 @@
 //           `;
 //         }
 
-//         // Regular objects - show as JSON
 //         return `<pre class="table-library-object">${JSON.stringify(
 //           cell,
 //           null,
@@ -625,7 +837,6 @@
 //         )}</pre>`;
 //       }
 
-//       // Handle arrays
 //       if (Array.isArray(cell)) {
 //         if (cell.length === 0)
 //           return '<span class="table-library-empty">[]</span>';
@@ -634,44 +845,40 @@
 //         )}">[${cell.join(", ")}]</span>`;
 //       }
 
-//       // Handle dates
 //       if (cell instanceof Date && !isNaN(cell.getTime())) {
 //         return `<span class="table-library-date">${this.formatDateOrTimestamp(
 //           cell
 //         )}</span>`;
 //       }
 
-//       // Handle booleans
 //       if (typeof cell === "boolean") {
 //         return `<span class="table-library-boolean ${
 //           cell ? "true" : "false"
 //         }">${cell ? "Yes" : "No"}</span>`;
 //       }
 
-//       // Handle numbers
 //       if (typeof cell === "number") {
 //         return `<span class="table-library-number">${cell}</span>`;
 //       }
 
-//       // Default: string representation
 //       const text = String(cell);
 //       return `<span class="table-library-text" title="${text}">${text}</span>`;
 //     }
 
-//     // Initialize the table
+//     /**
+//      * Initialize the table - main entry point
+//      */
 //     init() {
-//       // Process data
 //       let processed = this.hideColumns(this.config.headings, this.config.data);
 //       let finalData = this.applyModifications(
 //         processed.data,
 //         processed.headings
 //       );
 
-//       // Store processed data
 //       this.processedData = finalData;
 //       this.processedHeadings = processed.headings;
+//       this.filteredData = [...finalData]; // Initially same as processed data
 
-//       // Generate and insert HTML
 //       const container =
 //         typeof this.config.container === "string"
 //           ? document.querySelector(this.config.container)
@@ -683,16 +890,16 @@
 //       }
 
 //       container.innerHTML = this.generateHTML(processed.headings, finalData);
-
-//       // Initialize functionality
 //       this.attachEventListeners();
 //     }
 
-//     // Attach event listeners
+//     /**
+//      * Attach all event listeners for interactivity
+//      */
 //     attachEventListeners() {
 //       const { tableID } = this.config;
 
-//       // Filter functionality
+//       // Debounce function for performance
 //       const debounce = (fn, delay) => {
 //         let timeout;
 //         return (...args) => {
@@ -701,11 +908,14 @@
 //         };
 //       };
 
+//       // Filter functionality
 //       const filterTable = () => {
 //         const inputs = document.querySelectorAll(`#${tableID} thead input`);
 //         const rows = document.querySelectorAll(`#${tableID} tbody tr`);
 
-//         rows.forEach((row) => {
+//         const visibleRowIndexes = [];
+
+//         rows.forEach((row, index) => {
 //           let visible = true;
 //           inputs.forEach((input, i) => {
 //             const filter = input.value.trim().toLowerCase();
@@ -715,7 +925,13 @@
 //             }
 //           });
 //           row.style.display = visible ? "" : "none";
+//           if (visible) visibleRowIndexes.push(index);
 //         });
+
+//         // Update filtered data based on visible rows
+//         this.filteredData = visibleRowIndexes.map(
+//           (index) => this.processedData[index]
+//         );
 //       };
 
 //       // Filter events
@@ -725,10 +941,20 @@
 //           input.addEventListener("input", debounce(filterTable, 300))
 //         );
 
+//       // Download button event
+//       if (this.config.downloadConfig.enable) {
+//         const downloadBtn = document.getElementById(`${tableID}-download`);
+//         if (downloadBtn) {
+//           downloadBtn.addEventListener("click", () => this.downloadTableData());
+//         }
+//       }
+
 //       // Button click events
 //       document.querySelectorAll(".table-library-action-btn").forEach((btn) => {
 //         btn.addEventListener("click", (e) => {
 //           e.preventDefault();
+//           e.stopPropagation();
+
 //           const fnName = btn.dataset.fn;
 //           const rowIndex = parseInt(btn.dataset.rowIndex);
 //           const rowData = this.processedData[rowIndex];
@@ -739,32 +965,16 @@
 //             btn.style.transform = "";
 //           }, 150);
 
-//           // Call user function
 //           this.callUserFunction(fnName, rowData, rowIndex);
 
-//           // Call user function and get return value
-//           const result = this.callUserFunction(fnName, rowData, rowIndex);
-
-//           // If user function returns true, then check the checkbox
-//           // This gives users control over when to check the checkbox
-//           if (result === true) {
-//             const checkbox = btn
-//               .closest(".table-library-action-cell")
-//               ?.querySelector(".table-library-action-checkbox");
-//             if (checkbox) {
-//               checkbox.checked = true;
-//               this.handleCheckboxChange(rowData, rowIndex, true);
-//             }
+//           // Auto-check the checkbox when button is clicked
+//           const checkbox = btn
+//             .closest(".table-library-action-cell")
+//             ?.querySelector(".table-library-action-checkbox");
+//           if (checkbox) {
+//             checkbox.checked = true;
+//             this.handleCheckboxChange(rowData, rowIndex, true);
 //           }
-
-//           // // Auto-check related checkbox
-//           // const checkbox = btn
-//           //   .closest(".table-library-action-cell")
-//           //   ?.querySelector(".table-library-action-checkbox");
-//           // if (checkbox) {
-//           //   checkbox.checked = true;
-//           //   this.handleCheckboxChange(rowData, rowIndex, true);
-//           // }
 //         });
 //       });
 
@@ -772,13 +982,17 @@
 //       document
 //         .querySelectorAll(".table-library-action-checkbox")
 //         .forEach((cb) => {
-//           cb.addEventListener("change", () => {
+//           cb.addEventListener("click", (e) => {
+//             e.stopPropagation();
+//           });
+
+//           cb.addEventListener("change", (e) => {
 //             const rowIndex = parseInt(cb.dataset.rowIndex);
 //             const fnName = cb.dataset.fn;
 //             const rowData = this.processedData[rowIndex];
+
 //             this.handleCheckboxChange(rowData, rowIndex, cb.checked);
 
-//             // Call checkbox function if exists
 //             if (fnName) {
 //               this.callUserFunction(
 //                 fnName + "Checkbox",
@@ -791,22 +1005,107 @@
 //         });
 //     }
 
-//     // Call user-defined function
-//     callUserFunction(fnName, rowData, rowIndex, checkboxState = null) {
-//       // Check global scope first
-//       if (typeof window[fnName] === "function") {
-//         if (checkboxState !== null) {
-//           return window[fnName](rowData, rowIndex, checkboxState);
-//         } else {
-//           return window[fnName](rowData, rowIndex);
-//         }
+//     /**
+//      * Download table data as CSV
+//      */
+//     downloadTableData() {
+//       const { downloadConfig } = this.config;
+//       const {
+//         filename = "table-data.csv",
+//         format = "csv",
+//         includeHeaders = true,
+//         customDownloadFunction = null,
+//       } = downloadConfig;
+
+//       // If user provides custom download function
+//       if (typeof customDownloadFunction === "function") {
+//         customDownloadFunction(this.filteredData, this.processedHeadings);
+//         return;
 //       }
 
-//       console.warn(`Function ${fnName} not found`);
+//       // Default CSV download
+//       if (format === "csv") {
+//         this.downloadAsCSV(filename, includeHeaders);
+//       }
+//     }
+
+//     /**
+//      * Download filtered data as CSV
+//      */
+//     downloadAsCSV(filename, includeHeaders = true) {
+//       const headers = this.processedHeadings;
+//       const data = this.filteredData;
+
+//       // Convert data to CSV format
+//       let csvContent = "";
+
+//       // Add headers
+//       if (includeHeaders) {
+//         csvContent += headers.map((header) => `"${header}"`).join(",") + "\n";
+//       }
+
+//       // Add rows
+//       data.forEach((row) => {
+//         const csvRow = row.map((cell) => {
+//           if (cell === null || cell === undefined) return '""';
+
+//           let cellValue = cell;
+
+//           // Handle objects and arrays
+//           if (typeof cell === "object") {
+//             if (cell.type === "button") {
+//               cellValue = cell.placeholder || "Action";
+//             } else if (Array.isArray(cell)) {
+//               cellValue = cell.join("; ");
+//             } else if (cell instanceof Date) {
+//               cellValue = this.formatDateOrTimestamp(cell);
+//             } else {
+//               cellValue = JSON.stringify(cell);
+//             }
+//           }
+
+//           // Escape quotes and convert to string
+//           const stringValue = String(cellValue).replace(/"/g, '""');
+//           return `"${stringValue}"`;
+//         });
+
+//         csvContent += csvRow.join(",") + "\n";
+//       });
+
+//       // Create and trigger download
+//       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+//       const link = document.createElement("a");
+//       const url = URL.createObjectURL(blob);
+
+//       link.setAttribute("href", url);
+//       link.setAttribute("download", filename);
+//       link.style.visibility = "hidden";
+
+//       document.body.appendChild(link);
+//       link.click();
+//       document.body.removeChild(link);
+//     }
+
+//     /**
+//      * Call user-defined function from global scope
+//      */
+//     callUserFunction(fnName, rowData, rowIndex, checkboxState = null) {
+//       if (typeof window[fnName] === "function") {
+//         if (checkboxState !== null) {
+//           window[fnName](rowData, rowIndex, checkboxState);
+//         } else {
+//           window[fnName](rowData, rowIndex);
+//         }
+//         return true;
+//       }
+
+//       console.warn(`Function ${fnName} not found in global scope`);
 //       return false;
 //     }
 
-//     // Handle checkbox changes
+//     /**
+//      * Handle checkbox visual changes
+//      */
 //     handleCheckboxChange(rowData, rowIndex, checked) {
 //       const row = document.querySelector(`[data-row-index="${rowIndex}"]`);
 
@@ -819,14 +1118,49 @@
 //       }
 //     }
 
-//     // Public method to update data
+//     /**
+//      * PUBLIC API: Update table with new data
+//      */
 //     updateData(newData) {
 //       this.config.data = newData;
 //       this.init();
 //     }
+
+//     /**
+//      * PUBLIC API: Get current table data
+//      */
+//     getData() {
+//       return this.config.data;
+//     }
+
+//     /**
+//      * PUBLIC API: Get checked rows
+//      */
+//     getCheckedRows() {
+//       const checkedRows = [];
+//       document
+//         .querySelectorAll(".table-library-action-checkbox:checked")
+//         .forEach((cb) => {
+//           const rowIndex = parseInt(cb.dataset.rowIndex);
+//           checkedRows.push({
+//             index: rowIndex,
+//             data: this.processedData[rowIndex],
+//           });
+//         });
+//       return checkedRows;
+//     }
+
+//     /**
+//      * PUBLIC API: Get filtered data (data currently visible after search/filter)
+//      */
+//     getFilteredData() {
+//       return this.filteredData;
+//     }
 //   }
 
-//   // Global initialization function
+//   /**
+//    * GLOBAL INITIALIZATION FUNCTION
+//    */
 //   global.initTableLibrary = function (config) {
 //     return new TableLibrary(config);
 //   };
