@@ -21,9 +21,9 @@
 .table-library-container {
   width: 100%;
   overflow-x: auto;
-  background: var(--table-bg-main);
+  /* background: var(--table-bg-main); */
   border-radius: 14px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.05);
+  /* box-shadow: 0 6px 18px rgba(0, 0, 0, 0.05); */
   margin: 0 auto;
 }
 
@@ -269,7 +269,7 @@
 /* Download button styles */
 .table-library-download-container {
   padding: 15px 20px;
-  background: var(--table-bg);
+  /* background: var(--table-bg); */
   display: flex;
 }
 
@@ -330,6 +330,23 @@
 
 .table-library-download-btn:active {
   transform: translateY(0);
+}
+
+.table-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.table-metric-dropdown {
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.table-metric-result {
+  font-size: 12px;
+  color: #ffffff;
+  margin-top: 2px;
 }
 
 /* Responsive design */

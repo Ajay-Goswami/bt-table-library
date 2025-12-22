@@ -4,13 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Table Library Demo</title>
-    <link
+    <!-- <link
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/gh/ajay-goswami/bt-table-library@main/src/table-library.css"
     />
-    <script src="https://cdn.jsdelivr.net/gh/ajay-goswami/bt-table-library@main/src/table-library.js"></script>
-    <!-- <link href="../src/table-library.css" rel="stylesheet" />
-    <script src="../src/table-library.js"></script> -->
+    <script src="https://cdn.jsdelivr.net/gh/ajay-goswami/bt-table-library@main/src/table-library.js"></script> -->
+    <link href="../src/table-library.css" rel="stylesheet" />
+    <script src="../src/table-library.js"></script>
     <style>
       body {
         font-family: Arial, sans-serif;
@@ -25,6 +25,21 @@
         color: #333;
         text-align: center;
         margin-bottom: 30px;
+      }
+      table-library-download-btn {
+        background: var(--table-primary);
+        color: #f90000;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+      table-library-download-btn:hover {
+        background: var(--table-primary-dark);
+      }
+      table-library-download-btn:active {
+        transform: scale(0.95);
       }
     </style>
   </head>
