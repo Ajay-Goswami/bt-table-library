@@ -13,7 +13,7 @@ A lightweight, customizable **JavaScript Table Library** that lets you easily bu
 ## 🚀 Demo
 
 👉 **Live Demo (GitHub Pages):**  
-https://ajay-goswami.github.io/table-library/
+https://ameyabondre-bt.github.io/table-library/index.html
 
 ---
 
@@ -26,7 +26,7 @@ You can use the library directly from a CDN (no installation required):
 ```html
 <link
   rel="stylesheet"
-  href="https://cdn.jsdelivr.net/gh/ajay-goswami/table-library@main/src/table-library.css"
+  href="https://cdn.jsdelivr.net/gh/ameyabondre-bt/table-library@main/src/table-library.css"
 />
-<script src="https://cdn.jsdelivr.net/gh/ajay-goswami/table-library@main/src/table-library.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/ameyabondre-bt/table-library@main/src/table-library.js"></script>
 ```
